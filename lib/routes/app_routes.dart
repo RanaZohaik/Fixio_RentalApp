@@ -13,20 +13,30 @@ import '../screens/home/home_screen.dart';
 import '../screens/home/notification_screen.dart';
 import '../screens/home/profile_screen.dart';
 import '../screens/vender/upload_item_screen.dart';
+import '../screens/vender/vendor_dashboard_screen.dart';
+import '../screens/admin/admin_dashboard_screen.dart';
+
+// VERIFICATION
+import '../screens/verification/verification_pending_screen.dart';
+import '../screens/verification/liveness_check_screen.dart';
 
 class AppRoutes {
   // ------------------- ROUTE NAMES -------------------
-  static const String splash = '/';
-  static const String login = '/login';
-  static const String signupEmail = '/signup-email';
-  static const String verifyEmail = '/verify-email';
-  static const String signupDetails = '/signup-details';
-  static const String forgotPassword = '/forgot-password';
+  static const String splash               = '/';
+  static const String login                = '/login';
+  static const String signupEmail          = '/signup-email';
+  static const String verifyEmail          = '/verify-email';
+  static const String signupDetails        = '/signup-details';
+  static const String forgotPassword       = '/forgot-password';
 
-  static const String home = '/home';
-  static const String notifications = '/notifications';
-  static const String profile = '/profile';
-  static const String upload = '/upload';
+  static const String home                 = '/home';
+  static const String notifications        = '/notifications';
+  static const String profile              = '/profile';
+  static const String upload               = '/upload';
+  static const String adminDashboard       = '/admin';
+  static const String vendorDashboard      = '/vendor-dashboard';
+  static const String verificationPending  = '/verification-pending';
+  static const String livenessCheck = '/liveness-check';// ← ADD
 
   // ------------------- ROUTE GENERATOR -------------------
   static Route<dynamic> generateRoute(RouteSettings settings) {
@@ -44,7 +54,6 @@ class AppRoutes {
         return _page(const SignupEmailScreen());
 
       case verifyEmail:
-      // Pass the email so the user knows where the link was sent
         return _page(
           VerifyEmailScreen(
             email: args['email'] ?? '',
@@ -52,8 +61,6 @@ class AppRoutes {
         );
 
       case signupDetails:
-      // We no longer need to pass the password here because
-      // the user creates it on this screen.
         return _page(const SignupDetailsScreen());
 
       case forgotPassword:
@@ -71,6 +78,20 @@ class AppRoutes {
 
       case upload:
         return _page(const UploadItemScreen());
+
+    // ---------------- DASHBOARDS ----------------
+      case adminDashboard:
+        return _page(const AdminDashboardScreen());
+
+      case vendorDashboard:
+        return _page(const VendorDashboardScreen());
+
+    // ---------------- VERIFICATION ----------------
+      case verificationPending:                              // ← ADD
+        return _page(const VerificationPendingScreen());
+
+      case livenessCheck:
+        return _page(const LivenessCheckScreen());// ← ADD
 
     // ---------------- DEFAULT (404) ----------------
       default:

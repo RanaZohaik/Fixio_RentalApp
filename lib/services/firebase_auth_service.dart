@@ -5,74 +5,88 @@ import 'package:firebase_storage/firebase_storage.dart';
 import '../models/user_model.dart';
 
 class FirebaseAuthService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseAuth      _auth      = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  final FirebaseStorage   _storage   = FirebaseStorage.instance;
 
   Stream<User?> authStateChanges() => _auth.authStateChanges();
   User? get currentUser => _auth.currentUser;
 
-  // ----------------------------------------------------------------
-  // Upload profile image to Firebase Storage, returns download URL
-  // ----------------------------------------------------------------
-  Future<String?> uploadProfileImage(File imageFile, String uid) async {
-    try {
-      final ref = _storage.ref().child('profile_images/$uid.jpg');
-      final uploadTask = await ref.putFile(
-        imageFile,
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
-      final downloadUrl = await uploadTask.ref.getDownloadURL();
-      return downloadUrl;
-    } catch (e) {
-      return null;
-    }
+  // ── Upload profile image to Firebase Storage ───────────────────────────────
+  /// Uploads [imageFile] for [uid] and returns the public download URL.
+  /// Throws on failure so callers can handle the error properly.
+  Future<String> uploadProfileImage(File imageFile, String uid) async {
+    final ref = _storage.ref().child('profile_images/$uid.jpg');
+    final task = await ref.putFile(
+      imageFile,
+      SettableMetadata(contentType: 'image/jpeg'),
+    );
+    // Always get a fresh token so the URL doesn't expire from cache
+    return await task.ref.getDownloadURL();
   }
 
-  // ----------------------------------------------------------------
-  // Finalize Account: Sets Password + Uploads Image + Creates Firestore Profile
-  // ----------------------------------------------------------------
+  // ── Finalize Account (called from SignupDetailsScreen) ─────────────────────
+  /// Creates the user document in Firestore. If [profileImageFile] is
+  /// provided it is uploaded to Firebase Storage first and the resulting
+  /// URL is stored in `profileImage` in Firestore AND in Firebase Auth.
   Future<String?> finalizeAccount({
-    required String password,
-    required String name,
-    required String phone,
-    required String city,
+    required String   password,
+    required String   name,
+    required String   phone,
+    required String   city,
     required DateTime dob,
-    File? profileImageFile, // Pass the actual File object
-    String? profileImageUrl, // Or pass a pre-uploaded URL
+    File?   profileImageFile,
+    String? profileImageUrl,
   }) async {
     try {
       final user = _auth.currentUser;
-      if (user == null) return "No active session. Please try again.";
+      if (user == null) return 'No active session. Please try again.';
 
-      // 1. Update password
+      // 1. Set password first
       await user.updatePassword(password);
 
-      // 2. Upload profile image if provided
+      // 2. Upload profile image (if provided) → get fresh download URL
       String? imageUrl = profileImageUrl;
       if (profileImageFile != null) {
-        imageUrl = await uploadProfileImage(profileImageFile, user.uid);
+        try {
+          imageUrl = await uploadProfileImage(profileImageFile, user.uid);
+        } catch (e) {
+          // Image upload failed — log and continue without image
+          // (don't block account creation)
+          imageUrl = null;
+        }
       }
 
-      // 3. Build and save user model
-      final model = UserModel(
-        uid: user.uid,
-        name: name,
-        email: user.email!,
-        phone: phone,
-        city: city,
-        dob: Timestamp.fromDate(dob),
-        createdAt: Timestamp.now(),
-        profileImage: imageUrl,
-      );
+      // 3. Build the map explicitly so we control every field
+      final Map<String, dynamic> userData = {
+        'uid':          user.uid,
+        'name':         name,
+        'email':        user.email ?? '',
+        'phone':        phone,
+        'city':         city,
+        'dob':          Timestamp.fromDate(dob),
+        'createdAt':    Timestamp.now(),
+        'role':         'buyer',
+        'listingsCount':  0,
+        'completedDeals': 0,
+        'verificationStatus': 'unverified',
+      };
 
-      await _firestore.collection('users').doc(user.uid).set(model.toMap());
+      // Only write profileImage if we actually have a URL
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        userData['profileImage'] = imageUrl;
+      }
 
-      // 4. Update Firebase Auth display name & photo
+      // 4. Persist to Firestore
+      await _firestore.collection('users').doc(user.uid).set(userData);
+
+      // 5. Sync Firebase Auth display name & photo
       await user.updateDisplayName(name);
-      if (imageUrl != null) await user.updatePhotoURL(imageUrl);
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        await user.updatePhotoURL(imageUrl);
+      }
 
-      return null; // Success
+      return null; // success
     } on FirebaseAuthException catch (e) {
       return _mapError(e);
     } catch (e) {
@@ -80,36 +94,40 @@ class FirebaseAuthService {
     }
   }
 
-  // ----------------------------------------------------------------
-  // Update Profile (for EditProfileScreen)
-  // ----------------------------------------------------------------
+  // ── Update Profile (called from EditProfileScreen / ProfileScreen) ─────────
   Future<String?> updateProfile({
     required String name,
     required String phone,
     required String city,
-    File? profileImageFile,
+    File?           profileImageFile,
   }) async {
     try {
       final user = _auth.currentUser;
-      if (user == null) return "No active session.";
+      if (user == null) return 'No active session.';
 
       String? imageUrl;
       if (profileImageFile != null) {
+        // Upload and get a fresh URL — this overwrites the existing file
+        // because we always use the same path: profile_images/{uid}.jpg
         imageUrl = await uploadProfileImage(profileImageFile, user.uid);
       }
 
       final Map<String, dynamic> updates = {
-        'name': name,
-        'phone': phone,
-        'city': city,
+        'name':      name,
+        'phone':     phone,
+        'city':      city,
         'updatedAt': Timestamp.now(),
       };
-      if (imageUrl != null) updates['profileImage'] = imageUrl;
+
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        updates['profileImage'] = imageUrl;
+      }
 
       await _firestore.collection('users').doc(user.uid).update(updates);
-
       await user.updateDisplayName(name);
-      if (imageUrl != null) await user.updatePhotoURL(imageUrl);
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        await user.updatePhotoURL(imageUrl);
+      }
 
       return null;
     } on FirebaseAuthException catch (e) {
@@ -119,18 +137,69 @@ class FirebaseAuthService {
     }
   }
 
-  // ----------------------------------------------------------------
-  // Login with Email & Password
-  // ----------------------------------------------------------------
+  // ── Remove Profile Image ───────────────────────────────────────────────────
+  Future<String?> removeProfileImage() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return 'No active session.';
+
+      // Delete from Storage (ignore "object not found" errors)
+      try {
+        await _storage
+            .ref()
+            .child('profile_images/${user.uid}.jpg')
+            .delete();
+      } catch (_) {}
+
+      // Remove from Firestore — use FieldValue.delete() to fully remove the key
+      await _firestore.collection('users').doc(user.uid).update({
+        'profileImage': FieldValue.delete(),
+        'updatedAt':    Timestamp.now(),
+      });
+
+      // Clear from Firebase Auth profile
+      await user.updatePhotoURL(null);
+
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _mapError(e);
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  // ── Login ──────────────────────────────────────────────────────────────────
   Future<String?> login(String email, String password) async {
     try {
       final userCred = await _auth.signInWithEmailAndPassword(
-        email: email,
+        email:    email,
         password: password,
       );
+
       if (!userCred.user!.emailVerified) {
-        return "Please verify your email first.";
+        await _auth.signOut();
+        return 'Please verify your email before logging in.';
       }
+
+      final doc  = await _firestore
+          .collection('users')
+          .doc(userCred.user!.uid)
+          .get();
+      final data = doc.data();
+
+      if (data?['isSuspended'] == true) {
+        final reason = data?['suspensionReason'] as String? ?? '';
+        await _auth.signOut();
+        return reason.isNotEmpty
+            ? 'Account suspended: $reason'
+            : 'Your account has been suspended. Contact support.';
+      }
+
+      if (data?['isDisabled'] == true) {
+        await _auth.signOut();
+        return 'This account has been disabled.';
+      }
+
       return null;
     } on FirebaseAuthException catch (e) {
       return _mapError(e);
@@ -139,32 +208,28 @@ class FirebaseAuthService {
     }
   }
 
-  // ----------------------------------------------------------------
-  // Delete Account (requires recent login)
-  // ----------------------------------------------------------------
+  // ── Delete Account ─────────────────────────────────────────────────────────
   Future<String?> deleteAccount({required String password}) async {
     try {
       final user = _auth.currentUser;
-      if (user == null) return "No active session.";
+      if (user == null) return 'No active session.';
 
-      // Re-authenticate before deletion
       final credential = EmailAuthProvider.credential(
-        email: user.email!,
+        email:    user.email!,
         password: password,
       );
       await user.reauthenticateWithCredential(credential);
 
-      // Delete Firestore data
       await _firestore.collection('users').doc(user.uid).delete();
 
-      // Delete profile image from Storage
       try {
-        await _storage.ref().child('profile_images/${user.uid}.jpg').delete();
-      } catch (_) {} // Ignore if no image
+        await _storage
+            .ref()
+            .child('profile_images/${user.uid}.jpg')
+            .delete();
+      } catch (_) {}
 
-      // Delete auth account
       await user.delete();
-
       return null;
     } on FirebaseAuthException catch (e) {
       return _mapError(e);
@@ -173,31 +238,24 @@ class FirebaseAuthService {
     }
   }
 
-  // ----------------------------------------------------------------
-  // Disable Account (sets disabled flag in Firestore; full disable
-  // requires a Cloud Function with Admin SDK)
-  // ----------------------------------------------------------------
+  // ── Disable Account ────────────────────────────────────────────────────────
   Future<String?> disableAccount({required String password}) async {
     try {
       final user = _auth.currentUser;
-      if (user == null) return "No active session.";
+      if (user == null) return 'No active session.';
 
-      // Re-authenticate
       final credential = EmailAuthProvider.credential(
-        email: user.email!,
+        email:    user.email!,
         password: password,
       );
       await user.reauthenticateWithCredential(credential);
 
-      // Mark account as disabled in Firestore
       await _firestore.collection('users').doc(user.uid).update({
         'isDisabled': true,
         'disabledAt': Timestamp.now(),
       });
 
-      // Sign out the user
       await _auth.signOut();
-
       return null;
     } on FirebaseAuthException catch (e) {
       return _mapError(e);
@@ -206,9 +264,7 @@ class FirebaseAuthService {
     }
   }
 
-  // ----------------------------------------------------------------
-  // Fetch user favorites from Firestore
-  // ----------------------------------------------------------------
+  // ── Favorites stream ───────────────────────────────────────────────────────
   Stream<List<Map<String, dynamic>>> favoritesStream() {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return const Stream.empty();
@@ -219,12 +275,13 @@ class FirebaseAuthService {
         .collection('favorites')
         .orderBy('savedAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs.map((d) => {...d.data(), 'id': d.id}).toList());
+        .map((snap) =>
+        snap.docs.map((d) => {...d.data(), 'id': d.id}).toList());
   }
 
   Future<void> logout() async => _auth.signOut();
 
-  // ----------------------------------------------------------------
+  // ── Error mapping ──────────────────────────────────────────────────────────
   String _mapError(FirebaseAuthException e) {
     switch (e.code) {
       case 'weak-password':

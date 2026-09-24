@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fixio/constants/app_colors.dart';
 import 'package:fixio/routes/app_routes.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -27,16 +28,39 @@ class _FixioSplashScreenState extends State<FixioSplashScreen>
     Future.delayed(const Duration(seconds: 3), _checkAuthState);
   }
 
+  // Only this method changed — added admin role check
   void _checkAuthState() async {
     final user = FirebaseAuth.instance.currentUser;
+
     if (user != null) {
+      // Check if admin first (admins skip email verification)
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+
+        final role = doc.data()?['role'] as String? ?? 'buyer';
+
+        if (!mounted) return;
+
+        if (role == 'admin') {
+          Navigator.pushReplacementNamed(context, AppRoutes.adminDashboard);
+          return;
+        }
+      } catch (_) {
+        // If Firestore fails, fall through to normal flow
+      }
+
+      // Regular user — check email verification
       await user.reload();
       if (user.emailVerified) {
-        Navigator.pushReplacementNamed(context, AppRoutes.home);
+        if (mounted) Navigator.pushReplacementNamed(context, AppRoutes.home);
         return;
       }
     }
-    Navigator.pushReplacementNamed(context, AppRoutes.login);
+
+    if (mounted) Navigator.pushReplacementNamed(context, AppRoutes.login);
   }
 
   @override
@@ -80,7 +104,7 @@ class _FixioSplashScreenState extends State<FixioSplashScreen>
                   "Find it. Rent it. Own it.",
                   textAlign: TextAlign.center,
                   style: GoogleFonts.ubuntu(
-                    fontSize: size.width * 0.05, // responsive sizing
+                    fontSize: size.width * 0.05,
                     fontWeight: FontWeight.w500,
                     color: AppColors.textSecondary,
                   ),
@@ -144,7 +168,7 @@ class FixioLogo extends StatelessWidget {
   }
 }
 
-// Painter for animated floating circles + shapes
+// Painter for animated floating circles + shapes — unchanged
 class FloatingShapesPainter extends CustomPainter {
   final double animation;
 

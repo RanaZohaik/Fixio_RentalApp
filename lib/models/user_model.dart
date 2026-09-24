@@ -1,26 +1,29 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum CNICStatus { pending, verified }
+enum CNICStatus     { pending, verified }
 enum LivenessStatus { notCompleted, completed }
-enum UserRole { buyer, vendor }
+enum UserRole       { buyer, vendor, admin }
 
 class UserModel {
-  final String uid;
-  final String name;
-  final String email;
-  final String phone;
-  final String city;
-  final Timestamp dob;
-  final Timestamp createdAt;
-  final String? profileImage;         // Optional profile image URL
-  final CNICStatus cnicStatus;        // CNIC verification status
-  final LivenessStatus livenessStatus;// Liveness verification status
-  final UserRole role;                 // buyer/vendor
-  final int listingsCount;             // Vendor: number of active listings
-  final int completedDeals;            // Vendor: completed deals
-  final double rating;                 // Vendor: average rating (0-5)
+  final String         uid;
+  final String         name;
+  final String         email;
+  final String         phone;
+  final String         city;
+  final Timestamp      dob;
+  final Timestamp      createdAt;
+  final String?        profileImage;
+  final CNICStatus     cnicStatus;
+  final LivenessStatus livenessStatus;
+  final UserRole       role;
+  final int            listingsCount;
+  final int            completedDeals;
+  final double         rating;
+  final bool           isSuspended;
+  final String         suspensionReason;
+  final bool           isDisabled;
 
-  UserModel({
+  const UserModel({
     required this.uid,
     required this.name,
     required this.email,
@@ -29,125 +32,143 @@ class UserModel {
     required this.dob,
     required this.createdAt,
     this.profileImage,
-    this.cnicStatus = CNICStatus.pending,
-    this.livenessStatus = LivenessStatus.notCompleted,
-    this.role = UserRole.buyer,
-    this.listingsCount = 0,
-    this.completedDeals = 0,
-    this.rating = 0.0,
+    this.cnicStatus      = CNICStatus.pending,
+    this.livenessStatus  = LivenessStatus.notCompleted,
+    this.role            = UserRole.buyer,
+    this.listingsCount   = 0,
+    this.completedDeals  = 0,
+    this.rating          = 0.0,
+    this.isSuspended     = false,
+    this.suspensionReason = '',
+    this.isDisabled      = false,
   });
 
-  /// Create UserModel from Firestore document
+  // ── Factory from Firestore doc ────────────────────────────────────────────
   factory UserModel.fromDocument(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>? ?? {};
 
-    CNICStatus parseCNIC(String? val) {
-      switch (val) {
-        case 'verified':
-          return CNICStatus.verified;
-        default:
-          return CNICStatus.pending;
-      }
-    }
+    CNICStatus parseCNIC(String? val) =>
+        val == 'verified' ? CNICStatus.verified : CNICStatus.pending;
 
-    LivenessStatus parseLiveness(String? val) {
-      switch (val) {
-        case 'completed':
-          return LivenessStatus.completed;
-        default:
-          return LivenessStatus.notCompleted;
-      }
-    }
+    LivenessStatus parseLiveness(String? val) =>
+        val == 'completed' ? LivenessStatus.completed : LivenessStatus.notCompleted;
 
     UserRole parseRole(String? val) {
       switch (val) {
-        case 'vendor':
-          return UserRole.vendor;
-        default:
-          return UserRole.buyer;
+        case 'admin':  return UserRole.admin;
+        case 'vendor': return UserRole.vendor;
+        default:       return UserRole.buyer;
       }
     }
 
     return UserModel(
-      uid: doc.id,
-      name: data['name'] ?? '',
-      email: data['email'] ?? '',
-      phone: data['phone'] ?? '',
-      city: data['city'] ?? '',
-      dob: data['dob'] ?? Timestamp.now(),
-      createdAt: data['createdAt'] ?? Timestamp.now(),
-      profileImage: data['profileImage'],
-      cnicStatus: parseCNIC(data['cnicStatus']),
-      livenessStatus: parseLiveness(data['livenessStatus']),
-      role: parseRole(data['role']),
-      listingsCount: data['listingsCount'] ?? 0,
-      completedDeals: data['completedDeals'] ?? 0,
-      rating: (data['rating'] ?? 0).toDouble(),
+      uid              : doc.id,
+      name             : data['name']             as String? ?? '',
+      email            : data['email']            as String? ?? '',
+      phone            : data['phone']            as String? ?? '',
+      city             : data['city']             as String? ?? '',
+      dob              : data['dob']              as Timestamp? ?? Timestamp.now(),
+      createdAt        : data['createdAt']        as Timestamp? ?? Timestamp.now(),
+      profileImage     : data['profileImage']     as String?,
+      cnicStatus       : parseCNIC(data['cnicStatus']       as String?),
+      livenessStatus   : parseLiveness(data['livenessStatus'] as String?),
+      role             : parseRole(data['role']             as String?),
+      listingsCount    : (data['listingsCount']  as num?)?.toInt()    ?? 0,
+      completedDeals   : (data['completedDeals'] as num?)?.toInt()    ?? 0,
+      rating           : (data['rating']         as num?)?.toDouble() ?? 0.0,
+      isSuspended      : data['isSuspended']      as bool? ?? false,
+      suspensionReason : data['suspensionReason'] as String? ?? '',
+      isDisabled       : data['isDisabled']       as bool? ?? false,
     );
   }
 
-  /// Convert UserModel to Firestore Map
-  Map<String, dynamic> toMap() {
-    String cnicStr = cnicStatus == CNICStatus.verified ? 'verified' : 'pending';
-    String liveStr = livenessStatus == LivenessStatus.completed ? 'completed' : 'notCompleted';
-    String roleStr = role == UserRole.vendor ? 'vendor' : 'buyer';
+  // ── To Firestore map ──────────────────────────────────────────────────────
+  Map<String, dynamic> toMap() => {
+    'name'             : name,
+    'email'            : email,
+    'phone'            : phone,
+    'city'             : city,
+    'dob'              : dob,
+    'createdAt'        : createdAt,
+    'profileImage'     : profileImage,
+    'cnicStatus'       : _cnicStr,
+    'livenessStatus'   : _livenessStr,
+    'role'             : _roleStr,
+    'listingsCount'    : listingsCount,
+    'completedDeals'   : completedDeals,
+    'rating'           : rating,
+    'isSuspended'      : isSuspended,
+    'suspensionReason' : suspensionReason,
+    'isDisabled'       : isDisabled,
+  };
 
-    return {
-      'name': name,
-      'email': email,
-      'phone': phone,
-      'city': city,
-      'dob': dob,
-      'createdAt': createdAt,
-      'profileImage': profileImage,
-      'cnicStatus': cnicStr,
-      'livenessStatus': liveStr,
-      'role': roleStr,
-      'listingsCount': listingsCount,
-      'completedDeals': completedDeals,
-      'rating': rating,
-    };
+  // ── Private helpers ───────────────────────────────────────────────────────
+  String get _cnicStr {
+    switch (cnicStatus) {
+      case CNICStatus.verified: return 'verified';
+      default:                  return 'pending';
+    }
   }
 
-  /// Helper getters to convert Timestamps to DateTime
-  DateTime get dobDateTime => dob.toDate();
+  String get _livenessStr {
+    switch (livenessStatus) {
+      case LivenessStatus.completed: return 'completed';
+      default:                       return 'notCompleted';
+    }
+  }
+
+  String get _roleStr {
+    switch (role) {
+      case UserRole.admin:  return 'admin';
+      case UserRole.vendor: return 'vendor';
+      default:              return 'buyer';
+    }
+  }
+
+  // ── Convenience getters ───────────────────────────────────────────────────
+  DateTime get dobDateTime       => dob.toDate();
   DateTime get createdAtDateTime => createdAt.toDate();
+  bool get isCNICVerified        => cnicStatus == CNICStatus.verified;
+  bool get isLivenessCompleted   => livenessStatus == LivenessStatus.completed;
+  bool get isVendor              => role == UserRole.vendor;
+  bool get isAdmin               => role == UserRole.admin;
+  bool get isActive              => !isSuspended && !isDisabled;
 
-  /// Copy with method for easy updates
+  // ── CopyWith ──────────────────────────────────────────────────────────────
   UserModel copyWith({
-    String? name,
-    String? email,
-    String? phone,
-    String? city,
-    Timestamp? dob,
-    String? profileImage,
-    CNICStatus? cnicStatus,
+    String?         name,
+    String?         email,
+    String?         phone,
+    String?         city,
+    Timestamp?      dob,
+    String?         profileImage,
+    CNICStatus?     cnicStatus,
     LivenessStatus? livenessStatus,
-    UserRole? role,
-    int? listingsCount,
-    int? completedDeals,
-    double? rating,
-  }) {
-    return UserModel(
-      uid: uid,
-      name: name ?? this.name,
-      email: email ?? this.email,
-      phone: phone ?? this.phone,
-      city: city ?? this.city,
-      dob: dob ?? this.dob,
-      createdAt: createdAt,
-      profileImage: profileImage ?? this.profileImage,
-      cnicStatus: cnicStatus ?? this.cnicStatus,
-      livenessStatus: livenessStatus ?? this.livenessStatus,
-      role: role ?? this.role,
-      listingsCount: listingsCount ?? this.listingsCount,
-      completedDeals: completedDeals ?? this.completedDeals,
-      rating: rating ?? this.rating,
-    );
-  }
-
-  /// Convenience methods for displaying verification badges
-  bool get isCNICVerified => cnicStatus == CNICStatus.verified;
-  bool get isLivenessCompleted => livenessStatus == LivenessStatus.completed;
-  bool get isVendor => role == UserRole.vendor;
+    UserRole?       role,
+    int?            listingsCount,
+    int?            completedDeals,
+    double?         rating,
+    bool?           isSuspended,
+    String?         suspensionReason,
+    bool?           isDisabled,
+  }) =>
+      UserModel(
+        uid              : uid,
+        name             : name             ?? this.name,
+        email            : email            ?? this.email,
+        phone            : phone            ?? this.phone,
+        city             : city             ?? this.city,
+        dob              : dob              ?? this.dob,
+        createdAt        : createdAt,
+        profileImage     : profileImage     ?? this.profileImage,
+        cnicStatus       : cnicStatus       ?? this.cnicStatus,
+        livenessStatus   : livenessStatus   ?? this.livenessStatus,
+        role             : role             ?? this.role,
+        listingsCount    : listingsCount    ?? this.listingsCount,
+        completedDeals   : completedDeals   ?? this.completedDeals,
+        rating           : rating           ?? this.rating,
+        isSuspended      : isSuspended      ?? this.isSuspended,
+        suspensionReason : suspensionReason ?? this.suspensionReason,
+        isDisabled       : isDisabled       ?? this.isDisabled,
+      );
 }

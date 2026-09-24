@@ -4,7 +4,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:fixio/constants/app_colors.dart';
 import 'package:fixio/routes/app_routes.dart';
 import 'package:fixio/services/firebase_auth_service.dart';
-import 'package:fixio/widgets/gradientbackground.dart';
 
 class SignupDetailsScreen extends StatefulWidget {
   const SignupDetailsScreen({Key? key}) : super(key: key);
@@ -13,7 +12,8 @@ class SignupDetailsScreen extends StatefulWidget {
   State<SignupDetailsScreen> createState() => _SignupDetailsScreenState();
 }
 
-class _SignupDetailsScreenState extends State<SignupDetailsScreen> {
+class _SignupDetailsScreenState extends State<SignupDetailsScreen>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
 
   final TextEditingController _name     = TextEditingController();
@@ -23,12 +23,25 @@ class _SignupDetailsScreenState extends State<SignupDetailsScreen> {
 
   DateTime? _dob;
   File?     _profileImage;
-  bool      _loading      = false;
-  bool      _obscurePass  = true;
+  bool      _loading     = false;
+  bool      _obscurePass = true;
   String?   _error;
+
+  late AnimationController _animCtrl;
+  late Animation<double>   _fadeAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 600));
+    _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
+    _animCtrl.forward();
+  }
 
   @override
   void dispose() {
+    _animCtrl.dispose();
     _name.dispose();
     _phone.dispose();
     _city.dispose();
@@ -44,9 +57,9 @@ class _SignupDetailsScreenState extends State<SignupDetailsScreen> {
       lastDate: DateTime.now(),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: ColorScheme.dark(
+          colorScheme: ColorScheme.light(
             primary: AppColors.primaryBlue,
-            surface: const Color(0xFF1E2340),
+            surface: AppColors.surface,
           ),
         ),
         child: child!,
@@ -62,12 +75,11 @@ class _SignupDetailsScreenState extends State<SignupDetailsScreen> {
       builder: (_) => _ImageSourceSheet(),
     );
     if (source == null) return;
-
     final pickedFile = await ImagePicker().pickImage(
-      source: source,
+      source:       source,
       imageQuality: 70,
-      maxWidth: 800,
-      maxHeight: 800,
+      maxWidth:     800,
+      maxHeight:    800,
     );
     if (pickedFile != null) {
       setState(() => _profileImage = File(pickedFile.path));
@@ -80,23 +92,23 @@ class _SignupDetailsScreenState extends State<SignupDetailsScreen> {
       setState(() => _error = "Please select your date of birth");
       return;
     }
-
     setState(() {
       _loading = true;
       _error   = null;
     });
 
+    // Pass the profile image File directly — FirebaseAuthService uploads it
+    // to Firebase Storage and stores the download URL in Firestore.
     final result = await FirebaseAuthService().finalizeAccount(
       password:         _password.text.trim(),
       name:             _name.text.trim(),
       phone:            _phone.text.trim(),
       city:             _city.text.trim(),
       dob:              _dob!,
-      profileImageFile: _profileImage, // ← actual File passed for Storage upload
+      profileImageFile: _profileImage, // ← uploaded to Storage if not null
     );
 
     if (!mounted) return;
-
     if (result == null) {
       Navigator.pushNamedAndRemoveUntil(
           context, AppRoutes.home, (route) => false);
@@ -108,275 +120,353 @@ class _SignupDetailsScreenState extends State<SignupDetailsScreen> {
     }
   }
 
-  Widget _inputField(
-      TextEditingController controller,
-      String hint,
-      IconData icon, {
-        bool isPass       = false,
-        TextInputType? inputType,
-        String? Function(String?)? extraValidator,
-      }) {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: FadeTransition(
+          opacity: _fadeAnim,
+          child: Column(
+            children: [
+              // ── Top Bar ──────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    FixioBackButton(onTap: () => Navigator.pop(context)),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryBlueLight,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        "Step 3 of 3",
+                        style: TextStyle(
+                          fontSize:   12,
+                          fontWeight: FontWeight.w600,
+                          color:      AppColors.primaryBlue,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 12),
+
+                        Text(
+                          "Finalize profile",
+                          style: TextStyle(
+                            fontSize:      28,
+                            fontWeight:    FontWeight.bold,
+                            color:         AppColors.textPrimary,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          "Almost there! Fill in your details.",
+                          style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                        ),
+
+                        const SizedBox(height: 28),
+
+                        // ── Avatar Picker ────────────────────────────
+                        Center(
+                          child: GestureDetector(
+                            onTap: _loading ? null : _pickImage,
+                            child: Stack(
+                              children: [
+                                Container(
+                                  width:  96,
+                                  height: 96,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: AppColors.primaryBlueLight,
+                                    border: Border.all(color: AppColors.border, width: 2),
+                                  ),
+                                  child: _profileImage != null
+                                      ? ClipOval(
+                                    child: Image.file(
+                                      _profileImage!,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  )
+                                      : Icon(
+                                    Icons.person_outline_rounded,
+                                    color: AppColors.primaryBlue,
+                                    size: 44,
+                                  ),
+                                ),
+                                Positioned(
+                                  bottom: 2,
+                                  right:  2,
+                                  child: Container(
+                                    width:  28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color:  AppColors.primaryBlue,
+                                      shape:  BoxShape.circle,
+                                      border: Border.all(color: AppColors.background, width: 2),
+                                    ),
+                                    child: const Icon(
+                                      Icons.camera_alt_rounded,
+                                      color: Colors.white,
+                                      size:  13,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Center(
+                          child: Text(
+                            _profileImage == null ? "Tap to add photo" : "Tap to change photo",
+                            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                          ),
+                        ),
+
+                        const SizedBox(height: 28),
+
+                        // ── Form Fields ──────────────────────────────
+                        _FieldLabel("Full name"),
+                        const SizedBox(height: 8),
+                        _buildField(
+                          controller: _name,
+                          hint:       "Ahmad Ali",
+                          icon:       Icons.person_outline_rounded,
+                        ),
+                        const SizedBox(height: 16),
+
+                        _FieldLabel("Phone number"),
+                        const SizedBox(height: 8),
+                        _buildField(
+                          controller:    _phone,
+                          hint:          "03XX-XXXXXXX",
+                          icon:          Icons.phone_outlined,
+                          inputType:     TextInputType.phone,
+                          extraValidator: (v) {
+                            if (v != null && v.length < 10) {
+                              return "Enter a valid phone number";
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        _FieldLabel("City"),
+                        const SizedBox(height: 8),
+                        _buildField(
+                          controller: _city,
+                          hint:       "Lahore",
+                          icon:       Icons.location_city_outlined,
+                        ),
+                        const SizedBox(height: 16),
+
+                        _FieldLabel("Create password"),
+                        const SizedBox(height: 8),
+                        _buildField(
+                          controller: _password,
+                          hint:       "Min. 6 characters",
+                          icon:       Icons.lock_outline_rounded,
+                          isPass:     true,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // ── DOB Picker ───────────────────────────────
+                        _FieldLabel("Date of birth"),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: _loading ? null : _selectDOB,
+                          child: Container(
+                            height: 54,
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            decoration: BoxDecoration(
+                              color:        AppColors.surface,
+                              borderRadius: BorderRadius.circular(14),
+                              border:       Border.all(color: AppColors.border),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.cake_outlined,
+                                    color: AppColors.textSecondary, size: 20),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _dob == null
+                                        ? "Select date"
+                                        : "${_dob!.day}/${_dob!.month}/${_dob!.year}",
+                                    style: TextStyle(
+                                      color:    _dob == null
+                                          ? AppColors.textSecondary
+                                          : AppColors.textPrimary,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                ),
+                                Icon(Icons.calendar_today_rounded,
+                                    color: AppColors.textSecondary, size: 16),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        // ── Error ────────────────────────────────────
+                        if (_error != null) ...[
+                          const SizedBox(height: 18),
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color:        Colors.redAccent.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(12),
+                              border:       Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.error_outline_rounded,
+                                    color: Colors.redAccent, size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _error!,
+                                    style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        const SizedBox(height: 32),
+
+                        // ── Submit Button ────────────────────────────
+                        SizedBox(
+                          width:  double.infinity,
+                          height: 54,
+                          child: ElevatedButton(
+                            onPressed: _loading ? null : _completeSignup,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:         AppColors.primaryBlue,
+                              foregroundColor:         Colors.white,
+                              disabledBackgroundColor: AppColors.primaryBlue.withOpacity(0.5),
+                              elevation:               0,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
+                            child: _loading
+                                ? const SizedBox(
+                              width:  22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color:       Colors.white,
+                              ),
+                            )
+                                : const Text(
+                              "Save & Continue",
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 40),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildField({
+    required TextEditingController controller,
+    required String                hint,
+    required IconData              icon,
+    bool                           isPass     = false,
+    TextInputType?                 inputType,
+    String? Function(String?)?     extraValidator,
+  }) {
     return TextFormField(
       controller:   controller,
       obscureText:  isPass ? _obscurePass : false,
       keyboardType: inputType ?? TextInputType.text,
-      style:        const TextStyle(color: Colors.white),
+      style: TextStyle(color: AppColors.textPrimary, fontSize: 15),
       validator: (v) {
         if (v == null || v.trim().isEmpty) return "This field is required";
         if (isPass && v.length < 6) return "Password must be at least 6 characters";
         return extraValidator?.call(v);
       },
       decoration: InputDecoration(
-        hintText:  hint,
-        hintStyle: const TextStyle(color: Colors.white54),
-        prefixIcon: Icon(icon, color: Colors.white70),
+        hintText:    hint,
+        hintStyle:   TextStyle(color: AppColors.textSecondary, fontSize: 14),
+        prefixIcon:  Icon(icon, color: AppColors.textSecondary, size: 20),
         suffixIcon: isPass
             ? IconButton(
           icon: Icon(
-            _obscurePass ? Icons.visibility_off : Icons.visibility,
-            color: Colors.white54,
+            _obscurePass
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            color: AppColors.textSecondary,
+            size:  20,
           ),
           onPressed: () => setState(() => _obscurePass = !_obscurePass),
         )
             : null,
         filled:    true,
-        fillColor: Colors.white.withOpacity(0.12),
+        fillColor: AppColors.surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide:   BorderSide.none,
+          borderSide:   BorderSide(color: AppColors.border),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide:   BorderSide(color: Colors.white.withOpacity(0.15)),
+          borderSide:   BorderSide(color: AppColors.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide:   BorderSide(color: Colors.white.withOpacity(0.6), width: 1.5),
+          borderSide:   BorderSide(color: AppColors.primaryBlue, width: 1.5),
         ),
-        errorStyle: const TextStyle(color: Color(0xFFFF8A80)),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide:   const BorderSide(color: Colors.redAccent),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        errorStyle:     const TextStyle(color: Colors.redAccent, fontSize: 12),
       ),
     );
   }
+}
+
+// ── Field Label ───────────────────────────────────────────────────────────────
+class _FieldLabel extends StatelessWidget {
+  final String text;
+  const _FieldLabel(this.text);
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: GradientBackground(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 50),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                // Title
-                const Text(
-                  "Finalize Profile",
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  "Almost there! Fill in your details.",
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.65),
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 28),
-
-                // Profile image picker
-                GestureDetector(
-                  onTap: _loading ? null : _pickImage,
-                  child: Stack(
-                    children: [
-                      Container(
-                        width: 110,
-                        height: 110,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white.withOpacity(0.15),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.35),
-                            width: 2.5,
-                          ),
-                        ),
-                        child: _profileImage != null
-                            ? ClipOval(
-                          child: Image.file(
-                            _profileImage!,
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                            : const Icon(
-                          Icons.person_outline_rounded,
-                          color: Colors.white70,
-                          size: 52,
-                        ),
-                      ),
-                      Positioned(
-                        bottom: 4,
-                        right: 4,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryBlue,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                          child: const Icon(
-                            Icons.camera_alt_rounded,
-                            color: Colors.white,
-                            size: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _profileImage == null ? "Tap to add photo" : "Tap to change photo",
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.55),
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 28),
-
-                // Form fields
-                _inputField(_name, "Full Name", Icons.person_outline_rounded),
-                const SizedBox(height: 14),
-                _inputField(
-                  _phone,
-                  "Phone Number",
-                  Icons.phone_outlined,
-                  inputType: TextInputType.phone,
-                  extraValidator: (v) {
-                    if (v != null && v.length < 10) return "Enter a valid phone number";
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 14),
-                _inputField(_city, "City", Icons.location_city_outlined),
-                const SizedBox(height: 14),
-                _inputField(
-                  _password,
-                  "Create Password",
-                  Icons.lock_outline_rounded,
-                  isPass: true,
-                ),
-                const SizedBox(height: 14),
-
-                // DOB Selector
-                InkWell(
-                  onTap: _loading ? null : _selectDOB,
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 16, horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: Colors.white.withOpacity(0.15)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.cake_outlined, color: Colors.white70),
-                        const SizedBox(width: 12),
-                        Text(
-                          _dob == null
-                              ? "Date of Birth"
-                              : "${_dob!.day}/${_dob!.month}/${_dob!.year}",
-                          style: TextStyle(
-                            color: _dob == null
-                                ? Colors.white54
-                                : Colors.white,
-                            fontSize: 15,
-                          ),
-                        ),
-                        const Spacer(),
-                        Icon(
-                          Icons.calendar_today_rounded,
-                          color: Colors.white.withOpacity(0.5),
-                          size: 18,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Error message
-                if (_error != null) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.redAccent.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: Colors.redAccent.withOpacity(0.4)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline_rounded,
-                            color: Colors.redAccent, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _error!,
-                            style: const TextStyle(
-                                color: Colors.redAccent, fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 32),
-
-                // Submit button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _loading ? null : _completeSignup,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: AppColors.primaryBlue,
-                      disabledBackgroundColor: Colors.white38,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      elevation: 0,
-                    ),
-                    child: _loading
-                        ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: AppColors.primaryBlue,
-                      ),
-                    )
-                        : const Text(
-                      "Save & Continue",
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 30),
-              ],
-            ),
-          ),
-        ),
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize:   13,
+        fontWeight: FontWeight.w600,
+        color:      AppColors.textPrimary,
       ),
     );
   }
@@ -387,29 +477,30 @@ class _ImageSourceSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E2340),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      decoration: BoxDecoration(
+        color:        AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border:       Border.all(color: AppColors.border),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 36,
+            width:  36,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.white24,
+              color:        AppColors.border,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
-            "Select Photo",
+          Text(
+            "Select photo",
             style: TextStyle(
-              color: Colors.white,
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
+              color:      AppColors.textPrimary,
+              fontSize:   16,
+              fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 20),
@@ -417,12 +508,12 @@ class _ImageSourceSheet extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _SourceOption(
-                icon: Icons.photo_library_rounded,
+                icon:  Icons.photo_library_rounded,
                 label: "Gallery",
                 onTap: () => Navigator.pop(context, ImageSource.gallery),
               ),
               _SourceOption(
-                icon: Icons.camera_alt_rounded,
+                icon:  Icons.camera_alt_rounded,
                 label: "Camera",
                 onTap: () => Navigator.pop(context, ImageSource.camera),
               ),
@@ -452,19 +543,52 @@ class _SourceOption extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            width: 70,
-            height: 70,
+            width:  72,
+            height: 72,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
+              color:        AppColors.primaryBlueLight,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white24),
+              border:       Border.all(color: AppColors.primaryBlue.withOpacity(0.2)),
             ),
-            child: Icon(icon, color: Colors.white, size: 30),
+            child: Icon(icon, color: AppColors.primaryBlue, size: 28),
           ),
           const SizedBox(height: 8),
-          Text(label,
-              style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          Text(
+            label,
+            style: TextStyle(
+              color:      AppColors.textPrimary,
+              fontSize:   13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Shared back button ────────────────────────────────────────────────────────
+class FixioBackButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const FixioBackButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width:  40,
+        height: 40,
+        decoration: BoxDecoration(
+          color:        AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border:       Border.all(color: AppColors.border),
+        ),
+        child: Icon(
+          Icons.arrow_back_ios_new_rounded,
+          color: AppColors.textPrimary,
+          size:  18,
+        ),
       ),
     );
   }
